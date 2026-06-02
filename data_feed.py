@@ -28,9 +28,18 @@ def resolve_crude_token() -> Optional[str]:
     cfg = load_config()
     if cfg.crude_instrument_token:
         return cfg.crude_instrument_token
-    path = cfg.scrip_master_path
-    if not path:
-        logger.warning("SCRIP_MASTER_PATH not set; cannot resolve CRUDE token")
+    path = None
+    if cfg.auto_refresh_token or cfg.scrip_master_path:
+        try:
+            if cfg.auto_refresh_token:
+                from scrip_master_fetcher import download_scrip_master
+                path = download_scrip_master(cfg.scrip_master_url, dest=cfg.scrip_master_path or "scrip_master.csv")
+            else:
+                path = Path(cfg.scrip_master_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to download scrip master: %s", exc)
+    if not path or not Path(path).exists():
+        logger.warning("SCRIP_MASTER_PATH not available; cannot resolve CRUDE token")
         return None
     try:
         df = load_scrip_master(path)
