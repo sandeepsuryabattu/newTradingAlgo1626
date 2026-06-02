@@ -127,6 +127,11 @@ class KotakNeoFeed:
     def _handle_close(self, msg):
         logger.info("feed closed: %s", msg)
         self._connected = False
+        # Clear SDK's internal NeoWebSocket so next subscribe() creates a fresh connection
+        try:
+            self.client.NeoWebSocket = None
+        except Exception:  # noqa: BLE001
+            pass
 
     def _parse_tick(self, data: dict) -> Optional[Tick]:
         # Kotak SDK binary protocol maps to these JSON keys:
@@ -222,15 +227,16 @@ class KotakNeoFeed:
             )
         # Client handles websocket internally; detect disconnect and re-subscribe via SDK
         _disconnected_at: Optional[float] = None
+        loop = asyncio.get_event_loop()
         while not self._stop:
             await asyncio.sleep(1)
             if not self._connected:
                 if _disconnected_at is None:
-                    _disconnected_at = asyncio.get_event_loop().time()
-                elif asyncio.get_event_loop().time() - _disconnected_at > 10:
+                    _disconnected_at = loop.time()
+                elif loop.time() - _disconnected_at > 10:
                     logger.info("Detected disconnect >10s; forcing re-subscribe via SDK")
                     try:
-                        self._do_subscribe()
+                        await loop.run_in_executor(None, self._do_subscribe)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Re-subscribe failed: %s", exc)
                     _disconnected_at = None
