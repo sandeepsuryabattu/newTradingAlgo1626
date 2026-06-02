@@ -64,6 +64,26 @@ class KotakNeoFeed:
             consumer_key=self.cfg.consumer_key,
         )
         self._stop = False
+        self._sub_tokens: list[dict] = []
+
+    def _do_subscribe(self):
+        """Subscribe to stored tokens; call after login or reconnect."""
+        if not self._sub_tokens:
+            return
+        sensex = [t for t in self._sub_tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
+        crude = [t for t in self._sub_tokens if t["exchange_segment"].lower() == self.cfg.crude_exchange_segment.lower()]
+        if sensex:
+            try:
+                self.client.subscribe(instrument_tokens=sensex, isIndex=True, isDepth=False)
+                logger.info("Re-subscribed SENSEX: %s", [t["instrument_token"] for t in sensex])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("SENSEX re-subscribe failed: %s", exc)
+        if crude:
+            try:
+                self.client.subscribe(instrument_tokens=crude, isIndex=False, isDepth=False)
+                logger.info("Re-subscribed CRUDE: %s", [t["instrument_token"] for t in crude])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CRUDE re-subscribe failed: %s", exc)
 
     def _generate_totp(self) -> str:
         if not self.cfg.totp_secret:
@@ -102,21 +122,26 @@ class KotakNeoFeed:
         logger.info("feed closed: %s", msg)
 
     def _handle_open(self, msg):
-        logger.info("feed opened: %s", msg)
+        logger.info("feed opened: %s — re-subscribing", msg)
+        self._do_subscribe()
 
     def _parse_tick(self, data: dict) -> Optional[Tick]:
-        # Adapt this to actual fields from Kotak feed; logging unknown payloads helps tuning
+        # Kotak SDK binary protocol maps to these JSON keys:
+        #   ltp=last traded price, v=volume, tk=symbol, ftm0/dtm1=timestamps
         price = data.get("ltp") or data.get("last_price") or data.get("lastTradedPrice")
-        ts_val = data.get("timestamp") or data.get("ts")
-        volume = data.get("volume") or data.get("vol")
-        symbol = data.get("symbol") or data.get("tradingSymbol") or data.get("instrumentToken")
-        if price is None or ts_val is None:
-            logger.debug("unparsed tick: %s", data)
+        ts_val = data.get("ftm0") or data.get("dtm1") or data.get("timestamp") or data.get("ts")
+        volume = data.get("v") or data.get("volume") or data.get("vol")
+        symbol = data.get("tk") or data.get("symbol") or data.get("tradingSymbol") or data.get("instrumentToken")
+        if price is None:
+            logger.debug("unparsed tick (no price): %s", data)
             return None
-        if isinstance(ts_val, (int, float)):
-            ts = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val)
+        if ts_val:
+            if isinstance(ts_val, (int, float)):
+                ts = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val)
+            else:
+                ts = pd.to_datetime(ts_val)
         else:
-            ts = pd.to_datetime(ts_val)
+            ts = datetime.now()
         return Tick(ts=ts, price=float(price), volume=volume, symbol=symbol)
 
     async def connect(self, totp_code: Optional[str] = None):
@@ -176,6 +201,9 @@ class KotakNeoFeed:
             logger.info("Subscribing to CRUDE: %s", crude_token)
         else:
             logger.warning("CRUDE token not resolved; skipping crude subscription")
+
+        # Store tokens for reconnect resubscription
+        self._sub_tokens = tokens[:]
 
         # Subscribe SENSEX as index and CRUDE as futures separately
         loop = asyncio.get_event_loop()
