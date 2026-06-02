@@ -213,7 +213,8 @@ class KotakNeoFeed:
         # Store tokens for reconnect resubscription
         self._sub_tokens = tokens[:]
 
-        # Subscribe SENSEX as index and CRUDE as futures separately
+        # Subscribe SENSEX first to create websocket, then CRUDE after delay
+        # (Rapid dual subscribe spawns dueling threads that corrupt SDK's global ws)
         loop = asyncio.get_event_loop()
         sensex_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
         crude_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.crude_exchange_segment.lower()]
@@ -221,6 +222,7 @@ class KotakNeoFeed:
             await loop.run_in_executor(
                 None, lambda: self.client.subscribe(instrument_tokens=sensex_tokens, isIndex=True, isDepth=False)
             )
+            await asyncio.sleep(3)  # let SDK websocket establish before adding CRUDE
         if crude_tokens:
             await loop.run_in_executor(
                 None, lambda: self.client.subscribe(instrument_tokens=crude_tokens, isIndex=False, isDepth=False)
