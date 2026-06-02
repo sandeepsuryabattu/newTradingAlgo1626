@@ -113,6 +113,42 @@ async def signals(limit: int = Query(50, ge=1, le=500)) -> List[dict[str, Any]]:
     return df.to_dict(orient="records")
 
 
+@app.get("/api/price")
+async def price() -> dict[str, Any]:
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="DB not configured")
+
+    def _fmt_ts(ts):
+        if ts is None:
+            return None
+        if hasattr(ts, "isoformat"):
+            return ts.isoformat()
+        return str(ts)
+
+    # prefer live tick, fall back to latest OHLC close
+    with engine.connect() as conn:
+        tick = conn.execute(
+            text("SELECT ts, price, volume FROM ticks ORDER BY ts DESC LIMIT 1")
+        ).mappings().first()
+        if tick:
+            return {
+                "price": float(tick["price"]),
+                "ts": _fmt_ts(tick["ts"]),
+                "volume": tick.get("volume"),
+            }
+        ohlc = conn.execute(
+            text("SELECT ts, close FROM ohlc WHERE timeframe = '5m' ORDER BY ts DESC LIMIT 1")
+        ).mappings().first()
+        if ohlc:
+            return {
+                "price": float(ohlc["close"]),
+                "ts": _fmt_ts(ohlc["ts"]),
+                "volume": None,
+            }
+    return {"price": None, "ts": None, "volume": None}
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     engine = get_engine()

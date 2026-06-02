@@ -5,6 +5,7 @@ const refreshBtn = document.getElementById('refreshSignals');
 const tfButtons = document.querySelectorAll('.tf-group button');
 const modeBadge = document.getElementById('mode');
 const healthBadge = document.getElementById('health');
+const priceBadge = document.getElementById('price');
 const closedToggle = document.getElementById('closedToggle');
 
 let chart;
@@ -119,6 +120,22 @@ async function checkHealth() {
     ? 'rgba(16,185,129,0.18)' : 'rgba(248,113,113,0.18)';
 }
 
+async function checkPrice() {
+  try {
+    const data = await fetchJSON('/api/price');
+    if (data.price != null) {
+      priceBadge.textContent = `Price: ${data.price.toFixed(2)}`;
+      priceBadge.style.background = 'rgba(59,130,246,0.18)';
+    } else {
+      priceBadge.textContent = 'Price: --';
+      priceBadge.style.background = 'rgba(148,163,184,0.18)';
+    }
+  } catch (e) {
+    priceBadge.textContent = 'Price: --';
+    priceBadge.style.background = 'rgba(148,163,184,0.18)';
+  }
+}
+
 async function loadClosedSetting() {
   try {
     const res = await fetchJSON('/api/settings/closed_candle_trailing');
@@ -156,8 +173,9 @@ closedToggle.addEventListener('change', (e) => {
 
 (async function init() {
   modeBadge.textContent = `Mode: paper`;
-  await Promise.all([loadOhlc(), loadSignals(), checkHealth(), loadClosedSetting()]);
+  await Promise.all([loadOhlc(), loadSignals(), checkHealth(), checkPrice(), loadClosedSetting()]);
   setInterval(loadSignals, 15000);
   setInterval(loadOhlc, 20000);
   setInterval(checkHealth, 30000);
+  setInterval(checkPrice, 5000);
 })();

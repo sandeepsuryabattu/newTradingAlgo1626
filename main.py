@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional, Dict
 
 import pandas as pd
+import uvicorn
 
 from config import load_config
 from data_feed import KotakNeoFeed, Tick, resample_ticks
@@ -13,6 +14,13 @@ from telegram_client import TelegramClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def start_web_server(host: str = "0.0.0.0", port: int = 8000):
+    """Start FastAPI dashboard as a background coroutine."""
+    config = uvicorn.Config("web:app", host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 class SignalEngine:
@@ -169,6 +177,8 @@ class SignalEngine:
                         self.last_notified[rec["id"]] = msg
 
     async def run(self):
+        # Start web dashboard in background so it's always accessible
+        asyncio.create_task(start_web_server())
         feed = KotakNeoFeed(on_tick=self.on_tick)
         asyncio.create_task(feed.connect())
         while True:
