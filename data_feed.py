@@ -141,7 +141,7 @@ class KotakNeoFeed:
         if not sensex_token and sm_path:
             try:
                 df = load_master(sm_path)
-                sensex_token = resolve_token_from_master(df, self.cfg.sensex_symbol, self.cfg.sensex_exchange_segment)
+                sensex_token = resolve_token_from_master(df, self.cfg.sensex_symbol, self.cfg.sensex_exchange_segment, pick_nearest_expiry=True)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to resolve SENSEX from downloaded master: %s", exc)
         if not sensex_token:
@@ -163,7 +163,7 @@ class KotakNeoFeed:
                 crude_path = download_scrip_master_via_sdk(self.client, self.cfg.crude_exchange_segment, dest="scrip_master_crude.csv")
                 if crude_path:
                     df_crude = load_master(crude_path)
-                    crude_token = resolve_token_from_master(df_crude, self.cfg.crude_symbol, self.cfg.crude_exchange_segment)
+                    crude_token = resolve_token_from_master(df_crude, self.cfg.crude_symbol, self.cfg.crude_exchange_segment, inst_type="FUTCOM", pick_nearest_expiry=True)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to resolve CRUDE via SDK: %s", exc)
         if not crude_token:

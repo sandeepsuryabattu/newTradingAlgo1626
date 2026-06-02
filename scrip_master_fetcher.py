@@ -52,7 +52,13 @@ def download_scrip_master_via_sdk(client, exchange_segment: str, dest: str = "sc
         return None
 
 
-def resolve_token_from_master(df: pd.DataFrame, symbol: str, exchange_segment: str) -> Optional[str]:
+def resolve_token_from_master(
+    df: pd.DataFrame,
+    symbol: str,
+    exchange_segment: str,
+    inst_type: Optional[str] = None,
+    pick_nearest_expiry: bool = False,
+) -> Optional[str]:
     cols = {c.lower(): c for c in df.columns}
     # Support both old flat names and Kotak p-prefix names
     inst_col = (
@@ -72,13 +78,47 @@ def resolve_token_from_master(df: pd.DataFrame, symbol: str, exchange_segment: s
         or cols.get("exch_segment")
         or cols.get("pexchseg")
     )
+    type_col = (
+        cols.get("inst_type")
+        or cols.get("pinsttype")
+    )
+    expiry_col = (
+        cols.get("expiry_date")
+        or cols.get("pexpirydate")
+        or cols.get("l_expirydate")
+    )
     if not (inst_col and sym_col and exch_col):
         logger.error("Missing columns in scrip master; have: %s", list(df.columns)[:10])
         return None
+
+    # Try exact match first
     matches = df[
         (df[sym_col].astype(str).str.upper() == symbol.upper())
         & (df[exch_col].astype(str).str.lower() == exchange_segment.lower())
     ]
+
+    # If no exact match and pick_nearest_expiry, find base symbol futures
+    if matches.empty and pick_nearest_expiry:
+        base_mask = (
+            df[sym_col].astype(str).str.upper().str.startswith(symbol.upper())
+            & (df[exch_col].astype(str).str.lower() == exchange_segment.lower())
+        )
+        if inst_type and type_col:
+            base_mask &= df[type_col].astype(str).str.upper() == inst_type.upper()
+        candidates = df[base_mask]
+        if not candidates.empty and expiry_col:
+            # pick nearest expiry (smallest expiry date value)
+            candidates = candidates.copy()
+            candidates["_exp"] = pd.to_numeric(candidates[expiry_col], errors="coerce")
+            candidates = candidates[candidates["_exp"] > 0]
+            if not candidates.empty:
+                nearest = candidates.loc[candidates["_exp"].idxmin()]
+                token = str(nearest[inst_col])
+                sym = str(nearest[sym_col])
+                logger.info("Resolved nearest expiry: %s -> %s", sym, token)
+                return token
+        matches = candidates
+
     if matches.empty:
         logger.error("No match for %s on %s", symbol, exchange_segment)
         return None
