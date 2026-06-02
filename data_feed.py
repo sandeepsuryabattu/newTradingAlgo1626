@@ -65,9 +65,10 @@ class KotakNeoFeed:
         )
         self._stop = False
         self._sub_tokens: list[dict] = []
+        self._connected = False
 
     def _do_subscribe(self):
-        """Subscribe to stored tokens; call after login or reconnect."""
+        """Subscribe to stored tokens using SDK's built-in subscribe."""
         if not self._sub_tokens:
             return
         sensex = [t for t in self._sub_tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
@@ -75,15 +76,15 @@ class KotakNeoFeed:
         if sensex:
             try:
                 self.client.subscribe(instrument_tokens=sensex, isIndex=True, isDepth=False)
-                logger.info("Re-subscribed SENSEX: %s", [t["instrument_token"] for t in sensex])
+                logger.info("Subscribed SENSEX: %s", [t["instrument_token"] for t in sensex])
             except Exception as exc:  # noqa: BLE001
-                logger.warning("SENSEX re-subscribe failed: %s", exc)
+                logger.warning("SENSEX subscribe failed: %s", exc)
         if crude:
             try:
                 self.client.subscribe(instrument_tokens=crude, isIndex=False, isDepth=False)
-                logger.info("Re-subscribed CRUDE: %s", [t["instrument_token"] for t in crude])
+                logger.info("Subscribed CRUDE: %s", [t["instrument_token"] for t in crude])
             except Exception as exc:  # noqa: BLE001
-                logger.warning("CRUDE re-subscribe failed: %s", exc)
+                logger.warning("CRUDE subscribe failed: %s", exc)
 
     def _generate_totp(self) -> str:
         if not self.cfg.totp_secret:
@@ -118,12 +119,14 @@ class KotakNeoFeed:
     def _handle_error(self, error_message):
         logger.error("feed error: %s", error_message)
 
+    def _handle_open(self, msg):
+        logger.info("feed opened: %s", msg)
+        self._connected = True
+        self._do_subscribe()
+
     def _handle_close(self, msg):
         logger.info("feed closed: %s", msg)
-
-    def _handle_open(self, msg):
-        logger.info("feed opened: %s — re-subscribing", msg)
-        self._do_subscribe()
+        self._connected = False
 
     def _parse_tick(self, data: dict) -> Optional[Tick]:
         # Kotak SDK binary protocol maps to these JSON keys:
@@ -217,9 +220,22 @@ class KotakNeoFeed:
             await loop.run_in_executor(
                 None, lambda: self.client.subscribe(instrument_tokens=crude_tokens, isIndex=False, isDepth=False)
             )
-        # Client handles websocket internally; keep task alive until stop set
+        # Client handles websocket internally; detect disconnect and re-subscribe via SDK
+        _disconnected_at: Optional[float] = None
         while not self._stop:
             await asyncio.sleep(1)
+            if not self._connected:
+                if _disconnected_at is None:
+                    _disconnected_at = asyncio.get_event_loop().time()
+                elif asyncio.get_event_loop().time() - _disconnected_at > 10:
+                    logger.info("Detected disconnect >10s; forcing re-subscribe via SDK")
+                    try:
+                        self._do_subscribe()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Re-subscribe failed: %s", exc)
+                    _disconnected_at = None
+            else:
+                _disconnected_at = None
 
     def stop(self):
         self._stop = True
