@@ -10,6 +10,7 @@ import pyotp
 from neo_api_client import NeoAPI
 
 from config import load_config
+from scrip_master import find_index_token, load_scrip_master
 from scrip_master import resolve_sensex_token
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,26 @@ class Tick:
     ts: datetime
     price: float
     volume: Optional[float] = None
+    symbol: Optional[str] = None
+
+
+def resolve_crude_token() -> Optional[str]:
+    cfg = load_config()
+    if cfg.crude_instrument_token:
+        return cfg.crude_instrument_token
+    path = cfg.scrip_master_path
+    if not path:
+        logger.warning("SCRIP_MASTER_PATH not set; cannot resolve CRUDE token")
+        return None
+    try:
+        df = load_scrip_master(path)
+        token = find_index_token(df, cfg.crude_symbol, cfg.crude_exchange_segment)
+        if token:
+            logger.info("Resolved CRUDE token: %s", token)
+        return token
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to resolve CRUDE token: %s", exc)
+        return None
 
 
 class KotakNeoFeed:
@@ -79,6 +100,7 @@ class KotakNeoFeed:
         price = data.get("ltp") or data.get("last_price") or data.get("lastTradedPrice")
         ts_val = data.get("timestamp") or data.get("ts")
         volume = data.get("volume") or data.get("vol")
+        symbol = data.get("symbol") or data.get("tradingSymbol") or data.get("instrumentToken")
         if price is None or ts_val is None:
             logger.debug("unparsed tick: %s", data)
             return None
@@ -86,7 +108,7 @@ class KotakNeoFeed:
             ts = datetime.fromtimestamp(ts_val / 1000 if ts_val > 1e10 else ts_val)
         else:
             ts = pd.to_datetime(ts_val)
-        return Tick(ts=ts, price=float(price), volume=volume)
+        return Tick(ts=ts, price=float(price), volume=volume, symbol=symbol)
 
     async def connect(self, totp_code: Optional[str] = None):
         # Login (if needed) then subscribe using SDK websocket
@@ -107,6 +129,16 @@ class KotakNeoFeed:
                 "exchange_segment": self.cfg.sensex_exchange_segment,
             }
         ]
+        crude_token = resolve_crude_token()
+        if crude_token:
+            tokens.append({
+                "instrument_token": crude_token,
+                "exchange_segment": self.cfg.crude_exchange_segment,
+            })
+            logger.info("Subscribing to CRUDE: %s", crude_token)
+        else:
+            logger.warning("CRUDE token not resolved; skipping crude subscription")
+
         # By default, set isIndex True for index feed; adjust depth as needed
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
@@ -125,6 +157,12 @@ class KotakNeoFeed:
                     "exchange_segment": self.cfg.sensex_exchange_segment,
                 }
             ]
+            crude_token = resolve_crude_token()
+            if crude_token:
+                tokens.append({
+                    "instrument_token": crude_token,
+                    "exchange_segment": self.cfg.crude_exchange_segment,
+                })
             self.client.un_subscribe(instrument_tokens=tokens, isIndex=True, isDepth=False)
         except Exception as exc:  # noqa: BLE001
             logger.warning("unsubscribe error: %s", exc)

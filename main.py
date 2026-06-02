@@ -29,6 +29,7 @@ class SignalEngine:
         self.storage = Storage()  # uses local SQLite (storage.db by default)
         self.tg = TelegramClient()
         self.ticks: List[Tick] = []
+        self.crude_ticks: List[Tick] = []
         self.last_notified: Dict[int, str] = {}
 
     # ---------- Helpers for SL/TP computation ----------
@@ -86,8 +87,13 @@ class SignalEngine:
             logger.warning("telegram send failed: %s", exc)
 
     def on_tick(self, tick: Tick):
-        self.ticks.append(tick)
-        self.storage.insert_tick(tick.ts, tick.price, tick.volume)
+        sym = (tick.symbol or "").upper()
+        if self.cfg.crude_symbol.upper() in sym or "CRUDE" in sym:
+            self.crude_ticks.append(tick)
+            self.storage.insert_crude_tick(tick.ts, tick.price, tick.volume)
+        else:
+            self.ticks.append(tick)
+            self.storage.insert_tick(tick.ts, tick.price, tick.volume)
 
     def _manage_open_positions(self, df5: pd.DataFrame):
         if df5.empty:
@@ -187,6 +193,11 @@ class SignalEngine:
             df15 = resample_ticks(self.ticks, "15min")
             self.storage.insert_ohlc("5m", df5)
             self.storage.insert_ohlc("15m", df15)
+            # Crude OHLC
+            crude5 = resample_ticks(self.crude_ticks, "5min")
+            crude15 = resample_ticks(self.crude_ticks, "15min")
+            self.storage.insert_crude_ohlc("5m", crude5)
+            self.storage.insert_crude_ohlc("15m", crude15)
             # Manage open positions (trailing, exits)
             self._manage_open_positions(df5)
             sig = generate_signal(df5, df15, volume_available=df5["volume"].notna().any())

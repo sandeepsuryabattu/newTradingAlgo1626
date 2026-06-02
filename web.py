@@ -1,7 +1,6 @@
 import logging
-import time
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -11,13 +10,6 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
 
 from config import load_config
-
-try:
-    import yfinance as yf
-
-    YF_AVAILABLE = True
-except ImportError:
-    YF_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,34 +26,6 @@ def get_engine():
             logger.error("failed to create engine: %s", exc)
             get_engine._engine = None
     return get_engine._engine
-
-# crude price cache (ttl 60s)
-_crude_cache = {"price": None, "ts": None, "cached_at": 0}
-
-
-def _fetch_crude_price() -> Optional[float]:
-    if not YF_AVAILABLE:
-        return None
-    try:
-        ticker = yf.Ticker("CL=F")
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("yfinance crude fetch failed: %s", exc)
-    return None
-
-
-def _get_crude_price() -> tuple[Optional[float], Optional[str]]:
-    now = time.time()
-    if now - _crude_cache["cached_at"] < 60 and _crude_cache["price"] is not None:
-        return _crude_cache["price"], _crude_cache["ts"]
-    price = _fetch_crude_price()
-    from datetime import datetime, timezone
-
-    ts = datetime.now(timezone.utc).isoformat()
-    _crude_cache.update({"price": price, "ts": ts, "cached_at": now})
-    return price, ts
 
 
 app = FastAPI(title="SENSEX Signals Dashboard")
@@ -188,8 +152,38 @@ async def price() -> dict[str, Any]:
 
 @app.get("/api/crude")
 async def crude() -> dict[str, Any]:
-    price, ts = _get_crude_price()
-    return {"price": price, "ts": ts, "source": "yfinance" if YF_AVAILABLE else "unavailable"}
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="DB not configured")
+
+    def _fmt_ts(ts):
+        if ts is None:
+            return None
+        if hasattr(ts, "isoformat"):
+            return ts.isoformat()
+        return str(ts)
+
+    # prefer live crude tick, fall back to latest crude OHLC close
+    with engine.connect() as conn:
+        tick = conn.execute(
+            text("SELECT ts, price, volume FROM crude_ticks ORDER BY ts DESC LIMIT 1")
+        ).mappings().first()
+        if tick:
+            return {
+                "price": float(tick["price"]),
+                "ts": _fmt_ts(tick["ts"]),
+                "volume": tick.get("volume"),
+            }
+        ohlc = conn.execute(
+            text("SELECT ts, close FROM crude_ohlc WHERE timeframe = '5m' ORDER BY ts DESC LIMIT 1")
+        ).mappings().first()
+        if ohlc:
+            return {
+                "price": float(ohlc["close"]),
+                "ts": _fmt_ts(ohlc["ts"]),
+                "volume": None,
+            }
+    return {"price": None, "ts": None, "volume": None}
 
 
 @app.get("/api/health")

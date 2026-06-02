@@ -64,6 +64,28 @@ settings_table = Table(
     Column("value", String, nullable=False),
 )
 
+crude_ticks_table = Table(
+    "crude_ticks",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ts", DateTime, index=True, nullable=False),
+    Column("price", Float, nullable=False),
+    Column("volume", Float, nullable=True),
+)
+
+crude_ohlc_table = Table(
+    "crude_ohlc",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ts", DateTime, index=True, nullable=False),
+    Column("timeframe", String, index=True, nullable=False),
+    Column("open", Float, nullable=False),
+    Column("high", Float, nullable=False),
+    Column("low", Float, nullable=False),
+    Column("close", Float, nullable=False),
+    Column("volume", Float, nullable=True),
+)
+
 
 @dataclass
 class SignalRecord:
@@ -234,6 +256,45 @@ class Storage:
                         "volume": row.get("volume"),
                     },
                 )
+
+    def insert_crude_tick(self, ts: datetime, price: float, volume: Optional[float]):
+        sql = crude_ticks_table.insert()
+        with self.engine.begin() as conn:
+            conn.execute(sql, {"ts": ts, "price": price, "volume": volume})
+
+    def insert_crude_ohlc(self, timeframe: str, df: pd.DataFrame):
+        if df.empty:
+            return
+        records = df.reset_index()
+        sql = crude_ohlc_table.insert()
+        with self.engine.begin() as conn:
+            for _, row in records.iterrows():
+                conn.execute(
+                    sql,
+                    {
+                        "ts": row["ts"],
+                        "timeframe": timeframe,
+                        "open": row["open"],
+                        "high": row["high"],
+                        "low": row["low"],
+                        "close": row["close"],
+                        "volume": row.get("volume"),
+                    },
+                )
+
+    def get_latest_crude_tick(self) -> Optional[dict[str, Any]]:
+        sql = text("SELECT ts, price, volume FROM crude_ticks ORDER BY ts DESC LIMIT 1")
+        with self.engine.connect() as conn:
+            row = conn.execute(sql).mappings().first()
+        return dict(row) if row else None
+
+    def get_latest_crude_ohlc(self, timeframe: str = "5m") -> Optional[dict[str, Any]]:
+        sql = text(
+            "SELECT ts, close FROM crude_ohlc WHERE timeframe = :tf ORDER BY ts DESC LIMIT 1"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, {"tf": timeframe}).mappings().first()
+        return dict(row) if row else None
 
     def healthcheck(self) -> bool:
         try:

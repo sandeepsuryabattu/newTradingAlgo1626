@@ -24,6 +24,9 @@ class Config:
     sensex_instrument_token: str = ""
     sensex_exchange_segment: str = "bse_cm"  # e.g., bse_cm or nse_cm; set per scrip master
     sensex_symbol: str = "SENSEX"  # trading_symbol/search term in scrip master
+    crude_instrument_token: str = ""
+    crude_exchange_segment: str = "mcx_fo"  # mcx_fo for MCX futures
+    crude_symbol: str = "CRUDEOIL"  # or CRUDEOILM for mini
     scrip_master_path: str = ""  # optional local CSV/ZIP path; used to resolve tokens
     scrip_master_url: str = "https://developers.kotaksecurities.com/scrip-master"
     auto_refresh_token: bool = True  # download daily before 9am
@@ -48,6 +51,9 @@ def load_config() -> Config:
         sensex_instrument_token=os.getenv("SENSEX_INSTRUMENT_TOKEN", ""),
         sensex_exchange_segment=os.getenv("SENSEX_EXCHANGE_SEGMENT", "bse_cm"),
         sensex_symbol=os.getenv("SENSEX_SYMBOL", "SENSEX"),
+        crude_instrument_token=os.getenv("CRUDE_INSTRUMENT_TOKEN", ""),
+        crude_exchange_segment=os.getenv("CRUDE_EXCHANGE_SEGMENT", "mcx_fo"),
+        crude_symbol=os.getenv("CRUDE_SYMBOL", "CRUDEOIL"),
         scrip_master_path=os.getenv("SCRIP_MASTER_PATH", ""),
         scrip_master_url=os.getenv("SCRIP_MASTER_URL", "https://developers.kotaksecurities.com/scrip-master"),
         auto_refresh_token=os.getenv("AUTO_REFRESH_TOKEN", "true").lower() == "true",
