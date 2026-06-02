@@ -177,11 +177,18 @@ class KotakNeoFeed:
         else:
             logger.warning("CRUDE token not resolved; skipping crude subscription")
 
-        # By default, set isIndex True for index feed; adjust depth as needed
+        # Subscribe SENSEX as index and CRUDE as futures separately
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None, lambda: self.client.subscribe(instrument_tokens=tokens, isIndex=True, isDepth=False)
-        )
+        sensex_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
+        crude_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.crude_exchange_segment.lower()]
+        if sensex_tokens:
+            await loop.run_in_executor(
+                None, lambda: self.client.subscribe(instrument_tokens=sensex_tokens, isIndex=True, isDepth=False)
+            )
+        if crude_tokens:
+            await loop.run_in_executor(
+                None, lambda: self.client.subscribe(instrument_tokens=crude_tokens, isIndex=False, isDepth=False)
+            )
         # Client handles websocket internally; keep task alive until stop set
         while not self._stop:
             await asyncio.sleep(1)
