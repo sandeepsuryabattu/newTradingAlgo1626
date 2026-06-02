@@ -153,97 +153,111 @@ class KotakNeoFeed:
         return Tick(ts=ts, price=float(price), volume=volume, symbol=symbol)
 
     async def connect(self, totp_code: Optional[str] = None):
-        # Login (if needed) then subscribe using SDK websocket
-        self.login(totp_code=totp_code)
+        # Force fresh client each attempt to avoid stale websocket state
+        def build_client():
+            self.client = NeoAPI(
+                environment=self.cfg.environment,
+                neo_fin_key=self.cfg.neo_fin_key or None,
+                consumer_key=self.cfg.consumer_key,
+            )
+            self.client.on_message = self._handle_message
+            self.client.on_error = self._handle_error
+            self.client.on_close = self._handle_close
+            self.client.on_open = self._handle_open
 
-        self.client.on_message = self._handle_message
-        self.client.on_error = self._handle_error
-        self.client.on_close = self._handle_close
-        self.client.on_open = self._handle_open
-
-        # Download scrip master via authenticated SDK so token resolution works
         from scrip_master_fetcher import download_scrip_master_via_sdk, load_master, resolve_token_from_master
 
-        sm_path = None
-        try:
-            sm_path = download_scrip_master_via_sdk(self.client, self.cfg.sensex_exchange_segment, dest="scrip_master_sensex.csv")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("SDK scrip master download failed: %s", exc)
-
-        sensex_token = self.cfg.sensex_instrument_token
-        if not sensex_token and sm_path:
-            try:
-                df = load_master(sm_path)
-                sensex_token = resolve_token_from_master(df, self.cfg.sensex_symbol, self.cfg.sensex_exchange_segment, pick_nearest_expiry=True)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to resolve SENSEX from downloaded master: %s", exc)
-        if not sensex_token:
-            sensex_token = resolve_sensex_token()
-        if not sensex_token:
-            raise RuntimeError("Unable to resolve SENSEX instrument_token; set SENSEX_INSTRUMENT_TOKEN or SCRIP_MASTER_PATH")
-
-        tokens = [
-            {
-                "instrument_token": sensex_token,
-                "exchange_segment": self.cfg.sensex_exchange_segment,
-            }
-        ]
-
-        # Resolve CRUDE using same scrip master (MCX segment)
-        crude_token = self.cfg.crude_instrument_token
-        if not crude_token:
-            try:
-                crude_path = download_scrip_master_via_sdk(self.client, self.cfg.crude_exchange_segment, dest="scrip_master_crude.csv")
-                if crude_path:
-                    df_crude = load_master(crude_path)
-                    crude_token = resolve_token_from_master(df_crude, self.cfg.crude_symbol, self.cfg.crude_exchange_segment, inst_type="FUTCOM", pick_nearest_expiry=True)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to resolve CRUDE via SDK: %s", exc)
-        if not crude_token:
-            crude_token = resolve_crude_token()
-        if crude_token:
-            tokens.append({
-                "instrument_token": crude_token,
-                "exchange_segment": self.cfg.crude_exchange_segment,
-            })
-            logger.info("Subscribing to CRUDE: %s", crude_token)
-        else:
-            logger.warning("CRUDE token not resolved; skipping crude subscription")
-
-        # Store tokens for reconnect resubscription
-        self._sub_tokens = tokens[:]
-
-        # Subscribe SENSEX first to create websocket, then CRUDE after delay
-        # (Rapid dual subscribe spawns dueling threads that corrupt SDK's global ws)
-        loop = asyncio.get_event_loop()
-        sensex_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
-        crude_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.crude_exchange_segment.lower()]
-        if sensex_tokens:
-            await loop.run_in_executor(
-                None, lambda: self.client.subscribe(instrument_tokens=sensex_tokens, isIndex=True, isDepth=False)
-            )
-            await asyncio.sleep(3)  # let SDK websocket establish before adding CRUDE
-        if crude_tokens:
-            await loop.run_in_executor(
-                None, lambda: self.client.subscribe(instrument_tokens=crude_tokens, isIndex=False, isDepth=False)
-            )
-        # Client handles websocket internally; detect disconnect and re-subscribe via SDK
-        _disconnected_at: Optional[float] = None
-        loop = asyncio.get_event_loop()
         while not self._stop:
-            await asyncio.sleep(1)
-            if not self._connected:
-                if _disconnected_at is None:
-                    _disconnected_at = loop.time()
-                elif loop.time() - _disconnected_at > 10:
-                    logger.info("Detected disconnect >10s; forcing re-subscribe via SDK")
+            try:
+                build_client()
+                # Login (if needed) then subscribe using SDK websocket
+                self.login(totp_code=totp_code)
+
+                # Download scrip master via authenticated SDK so token resolution works
+                sm_path = None
+                try:
+                    sm_path = download_scrip_master_via_sdk(self.client, self.cfg.sensex_exchange_segment, dest="scrip_master_sensex.csv")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("SDK scrip master download failed: %s", exc)
+
+                sensex_token = self.cfg.sensex_instrument_token
+                if not sensex_token and sm_path:
                     try:
-                        await loop.run_in_executor(None, self._do_subscribe)
+                        df = load_master(sm_path)
+                        sensex_token = resolve_token_from_master(df, self.cfg.sensex_symbol, self.cfg.sensex_exchange_segment, pick_nearest_expiry=True)
                     except Exception as exc:  # noqa: BLE001
-                        logger.warning("Re-subscribe failed: %s", exc)
-                    _disconnected_at = None
-            else:
-                _disconnected_at = None
+                        logger.error("Failed to resolve SENSEX from downloaded master: %s", exc)
+                if not sensex_token:
+                    sensex_token = resolve_sensex_token()
+                if not sensex_token:
+                    raise RuntimeError("Unable to resolve SENSEX instrument_token; set SENSEX_INSTRUMENT_TOKEN or SCRIP_MASTER_PATH")
+
+                tokens = [
+                    {
+                        "instrument_token": sensex_token,
+                        "exchange_segment": self.cfg.sensex_exchange_segment,
+                    }
+                ]
+
+                # Resolve CRUDE using same scrip master (MCX segment)
+                crude_token = self.cfg.crude_instrument_token
+                if not crude_token:
+                    try:
+                        crude_path = download_scrip_master_via_sdk(self.client, self.cfg.crude_exchange_segment, dest="scrip_master_crude.csv")
+                        if crude_path:
+                            df_crude = load_master(crude_path)
+                            crude_token = resolve_token_from_master(df_crude, self.cfg.crude_symbol, self.cfg.crude_exchange_segment, inst_type="FUTCOM", pick_nearest_expiry=True)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Failed to resolve CRUDE via SDK: %s", exc)
+                if not crude_token:
+                    crude_token = resolve_crude_token()
+                if crude_token:
+                    tokens.append({
+                        "instrument_token": crude_token,
+                        "exchange_segment": self.cfg.crude_exchange_segment,
+                    })
+                    logger.info("Subscribing to CRUDE: %s", crude_token)
+                else:
+                    logger.warning("CRUDE token not resolved; skipping crude subscription")
+
+                # Store tokens for reconnect resubscription
+                self._sub_tokens = tokens[:]
+
+                # Subscribe SENSEX first to create websocket, then CRUDE after delay
+                # (Rapid dual subscribe spawns dueling threads that corrupt SDK's global ws)
+                loop = asyncio.get_event_loop()
+                sensex_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.sensex_exchange_segment.lower()]
+                crude_tokens = [t for t in tokens if t["exchange_segment"].lower() == self.cfg.crude_exchange_segment.lower()]
+                if sensex_tokens:
+                    await loop.run_in_executor(
+                        None, lambda: self.client.subscribe(instrument_tokens=sensex_tokens, isIndex=True, isDepth=False)
+                    )
+                    await asyncio.sleep(3)  # let SDK websocket establish before adding CRUDE
+                if crude_tokens:
+                    await loop.run_in_executor(
+                        None, lambda: self.client.subscribe(instrument_tokens=crude_tokens, isIndex=False, isDepth=False)
+                    )
+                # Client handles websocket internally; detect disconnect and re-subscribe via SDK
+                _disconnected_at: Optional[float] = None
+                loop = asyncio.get_event_loop()
+                while not self._stop:
+                    await asyncio.sleep(1)
+                    if not self._connected:
+                        if _disconnected_at is None:
+                            _disconnected_at = loop.time()
+                        elif loop.time() - _disconnected_at > 10:
+                            logger.info("Detected disconnect >10s; forcing re-subscribe via SDK")
+                            try:
+                                await loop.run_in_executor(None, self._do_subscribe)
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("Re-subscribe failed: %s", exc)
+                            _disconnected_at = None
+                    else:
+                        _disconnected_at = None
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Feed loop error; retrying in 5s: %s", exc)
+                await asyncio.sleep(5)
+
 
     def stop(self):
         self._stop = True
