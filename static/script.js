@@ -6,6 +6,7 @@ const tfButtons = document.querySelectorAll('.tf-group button');
 const modeBadge = document.getElementById('mode');
 const healthBadge = document.getElementById('health');
 const priceBadge = document.getElementById('price');
+const crudeBadge = document.getElementById('crude');
 const closedToggle = document.getElementById('closedToggle');
 
 let chart;
@@ -136,6 +137,22 @@ async function checkPrice() {
   }
 }
 
+async function checkCrude() {
+  try {
+    const data = await fetchJSON('/api/crude');
+    if (data.price != null) {
+      crudeBadge.textContent = `CRUDE: ${data.price.toFixed(2)}`;
+      crudeBadge.style.background = 'rgba(245,158,11,0.18)';
+    } else {
+      crudeBadge.textContent = 'CRUDE: --';
+      crudeBadge.style.background = 'rgba(148,163,184,0.18)';
+    }
+  } catch (e) {
+    crudeBadge.textContent = 'CRUDE: --';
+    crudeBadge.style.background = 'rgba(148,163,184,0.18)';
+  }
+}
+
 async function loadClosedSetting() {
   try {
     const res = await fetchJSON('/api/settings/closed_candle_trailing');
@@ -173,9 +190,10 @@ closedToggle.addEventListener('change', (e) => {
 
 (async function init() {
   modeBadge.textContent = `Mode: paper`;
-  await Promise.all([loadOhlc(), loadSignals(), checkHealth(), checkPrice(), loadClosedSetting()]);
+  await Promise.all([loadOhlc(), loadSignals(), checkHealth(), checkPrice(), checkCrude(), loadClosedSetting()]);
   setInterval(loadSignals, 15000);
   setInterval(loadOhlc, 20000);
   setInterval(checkHealth, 30000);
   setInterval(checkPrice, 5000);
+  setInterval(checkCrude, 60000);
 })();

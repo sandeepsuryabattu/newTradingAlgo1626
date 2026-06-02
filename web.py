@@ -1,6 +1,7 @@
 import logging
+import time
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
@@ -10,6 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
 
 from config import load_config
+
+try:
+    import yfinance as yf
+
+    YF_AVAILABLE = True
+except ImportError:
+    YF_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +34,35 @@ def get_engine():
             logger.error("failed to create engine: %s", exc)
             get_engine._engine = None
     return get_engine._engine
+
+# crude price cache (ttl 60s)
+_crude_cache = {"price": None, "ts": None, "cached_at": 0}
+
+
+def _fetch_crude_price() -> Optional[float]:
+    if not YF_AVAILABLE:
+        return None
+    try:
+        ticker = yf.Ticker("CL=F")
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("yfinance crude fetch failed: %s", exc)
+    return None
+
+
+def _get_crude_price() -> tuple[Optional[float], Optional[str]]:
+    now = time.time()
+    if now - _crude_cache["cached_at"] < 60 and _crude_cache["price"] is not None:
+        return _crude_cache["price"], _crude_cache["ts"]
+    price = _fetch_crude_price()
+    from datetime import datetime, timezone
+
+    ts = datetime.now(timezone.utc).isoformat()
+    _crude_cache.update({"price": price, "ts": ts, "cached_at": now})
+    return price, ts
+
 
 app = FastAPI(title="SENSEX Signals Dashboard")
 
@@ -147,6 +184,12 @@ async def price() -> dict[str, Any]:
                 "volume": None,
             }
     return {"price": None, "ts": None, "volume": None}
+
+
+@app.get("/api/crude")
+async def crude() -> dict[str, Any]:
+    price, ts = _get_crude_price()
+    return {"price": price, "ts": ts, "source": "yfinance" if YF_AVAILABLE else "unavailable"}
 
 
 @app.get("/api/health")
