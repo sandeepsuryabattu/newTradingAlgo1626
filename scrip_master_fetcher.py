@@ -54,11 +54,26 @@ def download_scrip_master_via_sdk(client, exchange_segment: str, dest: str = "sc
 
 def resolve_token_from_master(df: pd.DataFrame, symbol: str, exchange_segment: str) -> Optional[str]:
     cols = {c.lower(): c for c in df.columns}
-    inst_col = cols.get("instrument_token") or cols.get("instrumenttoken")
-    sym_col = cols.get("trading_symbol") or cols.get("symbol") or cols.get("tradingsymbol")
-    exch_col = cols.get("exchange_segment") or cols.get("exchseg") or cols.get("exch_segment")
+    # Support both old flat names and Kotak p-prefix names
+    inst_col = (
+        cols.get("instrument_token")
+        or cols.get("instrumenttoken")
+        or cols.get("psymbol")
+    )
+    sym_col = (
+        cols.get("trading_symbol")
+        or cols.get("symbol")
+        or cols.get("tradingsymbol")
+        or cols.get("ptrdsymbol")
+    )
+    exch_col = (
+        cols.get("exchange_segment")
+        or cols.get("exchseg")
+        or cols.get("exch_segment")
+        or cols.get("pexchseg")
+    )
     if not (inst_col and sym_col and exch_col):
-        logger.error("Missing columns in scrip master")
+        logger.error("Missing columns in scrip master; have: %s", list(df.columns)[:10])
         return None
     matches = df[
         (df[sym_col].astype(str).str.upper() == symbol.upper())
