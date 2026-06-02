@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+.envrc
+.DS_Store
+.idea/
+.vscode/
+!.vscode/settings.json
+*.sqlite
+*.db
+*.log
+*.pid
+scrip_master.csv
+scrip_master.zip
+
+# Byte-compiled / optimized / DLL files
+build/
+dist/
+*.egg-info/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/

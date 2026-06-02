@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENSEX Signals Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <p class="eyebrow">SENSEX Options — Paper Signals</p>
+        <h1>SENSEX Signal Monitor</h1>
+        <p class="sub">Live 5m/15m CPR, EMA slope, IB filters; option delta buckets per weekday.</p>
+      </div>
+      <div class="badges">
+        <span class="badge" id="health">Health: --</span>
+        <span class="badge" id="mode">Mode: paper</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card chart-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Index</p>
+            <h2>5m OHLC</h2>
+          </div>
+          <div class="tf-group">
+            <button data-tf="5m" class="active">5m</button>
+            <button data-tf="15m">15m</button>
+          </div>
+          <div class="toggle-group">
+            <span class="toggle-label">Closed-candle trailing</span>
+            <label class="switch">
+              <input type="checkbox" id="closedToggle" />
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+        <canvas id="ohlcChart"></canvas>
+      </div>
+
+      <div class="card signals-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Signals</p>
+            <h2>Recent</h2>
+          </div>
+          <button id="refreshSignals">Refresh</button>
+        </div>
+        <div id="currentSignal" class="signals" style="margin-bottom:8px;"></div>
+        <div id="signalsList" class="signals"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/static/script.js"></script>
+</body>
+</html>
