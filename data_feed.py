@@ -128,7 +128,24 @@ class KotakNeoFeed:
         self.client.on_close = self._handle_close
         self.client.on_open = self._handle_open
 
-        sensex_token = resolve_sensex_token()
+        # Download scrip master via authenticated SDK so token resolution works
+        from scrip_master_fetcher import download_scrip_master_via_sdk, load_master, resolve_token_from_master
+
+        sm_path = None
+        try:
+            sm_path = download_scrip_master_via_sdk(self.client, self.cfg.sensex_exchange_segment, dest="scrip_master_sensex.csv")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SDK scrip master download failed: %s", exc)
+
+        sensex_token = self.cfg.sensex_instrument_token
+        if not sensex_token and sm_path:
+            try:
+                df = load_master(sm_path)
+                sensex_token = resolve_token_from_master(df, self.cfg.sensex_symbol, self.cfg.sensex_exchange_segment)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to resolve SENSEX from downloaded master: %s", exc)
+        if not sensex_token:
+            sensex_token = resolve_sensex_token()
         if not sensex_token:
             raise RuntimeError("Unable to resolve SENSEX instrument_token; set SENSEX_INSTRUMENT_TOKEN or SCRIP_MASTER_PATH")
 
@@ -138,7 +155,19 @@ class KotakNeoFeed:
                 "exchange_segment": self.cfg.sensex_exchange_segment,
             }
         ]
-        crude_token = resolve_crude_token()
+
+        # Resolve CRUDE using same scrip master (MCX segment)
+        crude_token = self.cfg.crude_instrument_token
+        if not crude_token:
+            try:
+                crude_path = download_scrip_master_via_sdk(self.client, self.cfg.crude_exchange_segment, dest="scrip_master_crude.csv")
+                if crude_path:
+                    df_crude = load_master(crude_path)
+                    crude_token = resolve_token_from_master(df_crude, self.cfg.crude_symbol, self.cfg.crude_exchange_segment)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to resolve CRUDE via SDK: %s", exc)
+        if not crude_token:
+            crude_token = resolve_crude_token()
         if crude_token:
             tokens.append({
                 "instrument_token": crude_token,

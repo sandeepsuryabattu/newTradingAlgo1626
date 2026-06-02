@@ -8,10 +8,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_URL = "https://developers.kotaksecurities.com/scrip-master"
-
-
-def download_scrip_master(url: str = DEFAULT_URL, dest: str = "scrip_master.csv") -> Path:
+def download_scrip_master(url: str, dest: str = "scrip_master.csv") -> Path:
     """Download the daily scrip master CSV/ZIP from Kotak."""
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
@@ -19,6 +16,40 @@ def download_scrip_master(url: str = DEFAULT_URL, dest: str = "scrip_master.csv"
     dest_path.write_bytes(resp.content)
     logger.info("Downloaded scrip master to %s", dest_path)
     return dest_path
+
+
+def download_scrip_master_via_sdk(client, exchange_segment: str, dest: str = "scrip_master.csv") -> Optional[Path]:
+    """Download scrip master using Kotak SDK to discover correct URL."""
+    try:
+        sm = client.scrip_master()
+        files = sm.get("filesPaths", [])
+        # map exchange_segment to file suffix
+        seg_map = {
+            "nse_cm": "nse_cm",
+            "bse_cm": "bse_cm",
+            "nse_fo": "nse_fo",
+            "bse_fo": "bse_fo",
+            "mcx_fo": "mcx_fo",
+            "cde_fo": "cde_fo",
+        }
+        suffix = seg_map.get(exchange_segment.lower(), exchange_segment.lower().replace("_", ""))
+        url = None
+        for f in files:
+            if suffix in f.lower():
+                url = f
+                break
+        if not url:
+            logger.error("No scrip master file found for %s in %s", exchange_segment, files)
+            return None
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        dest_path = Path(dest)
+        dest_path.write_bytes(resp.content)
+        logger.info("Downloaded scrip master from SDK URL to %s", dest_path)
+        return dest_path
+    except Exception as exc:  # noqa: BLE001
+        logger.error("SDK scrip master download failed: %s", exc)
+        return None
 
 
 def resolve_token_from_master(df: pd.DataFrame, symbol: str, exchange_segment: str) -> Optional[str]:
@@ -45,7 +76,10 @@ def load_master(dest: Path) -> pd.DataFrame:
     return pd.read_csv(dest)
 
 
-def auto_resolve_token(symbol: str, exchange_segment: str, download_url: str = DEFAULT_URL, dest: str = "scrip_master.csv") -> Optional[str]:
-    path = download_scrip_master(download_url, dest)
+def auto_resolve_token(symbol: str, exchange_segment: str, download_url: str = "", dest: str = "scrip_master.csv") -> Optional[str]:
+    if download_url:
+        path = download_scrip_master(download_url, dest)
+    else:
+        raise ValueError("download_url required for auto_resolve_token")
     df = load_master(path)
     return resolve_token_from_master(df, symbol, exchange_segment)
