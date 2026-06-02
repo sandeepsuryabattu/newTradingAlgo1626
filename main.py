@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 async def start_web_server(host: str = "0.0.0.0", port: int = 8000):
     """Start FastAPI dashboard as a background coroutine."""
-    config = uvicorn.Config("web:app", host=host, port=port, log_level="info")
+    # Force wsproto to avoid websockets.datastructures import (SDK pins websockets 8.1)
+    config = uvicorn.Config("web:app", host=host, port=port, log_level="info", ws="wsproto")
     server = uvicorn.Server(config)
     await server.serve()
 
